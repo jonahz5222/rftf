@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" 
+        content="width=device-width, 
+        initial-scale=1.0, 
+        user-scalable=no" />
+  <title>Template Maker</title>
+</head>
+
+<style>
+    canvas {
+        border:1px solid black;
+        display:block;
+    }
+    #content
+    {
+        display:block;  
+    }
+    
+    input[type="text"] 
+    {
+        width: 200px;
+        height: 20px;
+        padding-right: 50px;
+    }
+
+    input[type="submit"] 
+    {
+        margin-left: -50px;
+        height: 25px;
+        width: 50px;
+        border: 0;
+        -webkit-appearance: none;
+    }
+</style>
+
+<body>
+  <div id="drag-drop-area"></div>
+  <div>
+    <button onclick="saveTemplate()">Save Template</button><br>
+  </div>
+  <div id='content'>
+  </div>
+  <link href="https://transloadit.edgly.net/releases/uppy/v1.8.0/uppy.min.css" rel="stylesheet">
+  
+  <script src="https://transloadit.edgly.net/releases/uppy/v1.8.0/uppy.min.js"></script>
+    <script>
+      var uppy = Uppy.Core()
+        .use(Uppy.Dashboard, {
+          inline: true,
+          target: '#drag-drop-area',
+          width:400,
+          height:200
+        })
+        .use(Uppy.Tus, {endpoint: 'https://master.tus.io/files/'})
+
+      uppy.on('complete', (result) => {
+        console.log('Upload complete! We’ve uploaded these files:', result.successful)
+        loadSourcePDF(result.successful[0].tus.uploadUrl);
+      })
+    </script>
+  
+  <script src="CanvasInput.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.2.228/build/pdf.min.js"></script>
+  <script>
+    //this tracks whether the mouse is currently dragging a selection box
+    var active = false;
+    
+    //the current rectangle/input being drawn
+    var currRect;
+
+    //adding these listeners allows us to get mouse click/position information
+    //pool is a list of all eelection box objects that should be rendered on each loop
+    var pool = [];
+    
+    // header on that server.
+    //var url = "https://opif-textract-data.s3.us-east-2.amazonaws.com/contract.pdf";//'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/examples/learning/helloworld.pdf';
+
+    // Loaded via <script> tag, create shortcut to access PDF.js exports.
+    var pdfjsLib = window['pdfjs-dist/build/pdf'];
+
+    var canvases = [];
+    
+    var renderTask;
+    var pdf_ready = false;
+    var pdf_url;
+    
+    function processPDF(url)
+    {
+        //Get pdf from url, render each page into a canvas
+        //save the canvas contents into a Base64 jpg string, and then redisplay over canvas
+        //i do this so that i can draw on top of the canvas element in the redraw function()
+        var loadingTask = pdfjsLib.getDocument(url);
+        loadingTask.promise.then(function(pdf) {
+            console.log('PDF loaded');
+            for(let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++)
+            {
+                pdf.getPage(pageNumber).then(function(page) {
+                    console.log('Page loaded');
+                    
+                    var scale = 1;
+                    var viewport = page.getViewport({scale: scale});
+
+                    // Prepare canvas using PDF page dimensions
+                    let canvas = prepareCanvas(pageNumber);
+                    canvases.push(canvas);
+                    
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    
+                    let context = canvas.getContext('2d');
+                    // Render PDF page into canvas context
+                    var renderContext = {
+                      canvasContext: context,
+                      viewport: viewport
+                    };
+                    
+                    var renderTask = page.render(renderContext);
+                    renderTask.promise.then(function () {
+                      //convert canvas contents into jpg
+                      canvas.background_image.src = canvas.toDataURL('image/jpg');
+                      canvas.pdf_ready = true;
+                      page.cleanup();
+                    });
+                },
+                function(error)
+                {
+                    console.log(error);
+                });
+            }
+        },null);
+    }
+    
+    function loadSourcePDF(url)
+    { 
+        setInterval(redraw, 10);
+        console.log(url);
+        processPDF(url);
+    }
+    
+    //prepare a canvas element for the rendering process
+    //adds callbacks and pdf page informationn to canvas element
+    function prepareCanvas(x)
+    {
+        const canvas = document.createElement('canvas');
+        canvas.setAttribute("id", "canvas-" + x.toString());
+        canvas.setAttribute("crossorigin", "");
+        //canvas.setAttribute("display", "block");
+        
+        document.getElementById('content').appendChild(canvas);
+         
+        canvas.addEventListener("touchstart", dragStart, false);
+        canvas.addEventListener("touchend", dragEnd, false);
+        canvas.addEventListener("touchmove", drag, false);
+
+        canvas.addEventListener("mousedown", dragStart, false);
+        canvas.addEventListener("mouseup", dragEnd, false);
+        canvas.addEventListener("mousemove", drag, false);
+        
+        canvas.oncontextmenu = function ()
+        {
+            return false;     // cancel default menu
+        }
+        
+        var background = new Image(730,1300);
+        var background_loaded = false;
+        background.onload = function(){
+            canvas.background_loaded = true;
+        }
+        
+        canvas.background_image = background;
+        canvas.pdf_ready = false;
+        
+        canvas.pageNum = x;
+        
+        return canvas;
+    }
+
+    function dragStart(e) {
+      //when drag is started, create a new rectangle, put it in the render pool, get the coordinates of the drag beginning location
+      currRect = new Object();
+      pool.push(currRect);
+      
+      currRect.canvas = e.target;
+      currRect.pageNumber = currRect.canvas.pageNum;
+      currRect.left = e.offsetX;
+      currRect.top = e.offsetY;
+
+      if (e.target.nodeName === "CANVAS") {
+        active = true;
+      }
+    }
+
+    function dragEnd(e) {
+      //this is called when the mouse drag is released
+ 
+      active = false;
+      
+      console.log(e.button);
+      
+      //if right click, delete whatever box is on top of the cursor
+      if (e.button == 2)
+      {
+        var x = e.offsetX;
+        var y = e.offsetY;
+        pool.forEach(function (entry){
+            if(x > entry.left && x < (entry.left + entry.width) && y > entry.top && y < (entry.top + entry.height))
+            {
+                entry.input.destroy();
+                let index = pool.indexOf(entry);
+                if(index !== -1) {
+                  pool.splice(index, 1);
+                }
+            }
+        });
+      }
+      
+      //if the total drag area is too small, delete the box because this was probably a single right click, not a drag
+      if (currRect.width == null || currRect.height == null || currRect.width < 5 || currRect.height < 5)
+      {
+        let index = pool.indexOf(currRect);
+        if(index !== -1) {
+          pool.splice(index, 1);
+        }
+        return;
+      }
+      
+      //on successful drag, create an input box above the selection box so that the user can type in the label
+      var input = new CanvasInput({
+        canvas:currRect.canvas,
+        x: currRect.left - 5,
+        y: currRect.top - 29
+      });
+      currRect.input = input;
+      
+      console.log(pool);
+      
+    }
+
+    function drag(e) {
+      //called during the drag event
+      //update the current selection boxes dimensions to match the drag motion
+      if (active) {
+      
+        e.preventDefault(); //idk what this does. Legacy code, am i right?
+     
+        currRect.width = (e.offsetX)-currRect.left;
+        currRect.height = (e.offsetY)-currRect.top;
+
+      }
+    }
+    function redraw()
+    {
+
+        canvases.forEach(function(canv)
+        {
+            redraw_canvas(canv);
+        });
+        
+    }
+    
+    function redraw_canvas(canvas)
+    {
+    
+        let context = canvas.getContext('2d');
+       
+        if (canvas.pdf_ready && canvas.background_loaded)
+        {
+            context.drawImage(canvas.background_image,0,0,canvas.width,canvas.height);   
+        }
+        
+        //for every object in the render loop, render it again and note any changes to the associated text inputs
+        pool.forEach(function(entry)
+        {
+            if(entry.canvas != canvas)
+            {
+                return;
+            }
+        
+            if(entry.width == null || entry.height == null)
+            {
+                return;
+            }   
+            context.beginPath();
+            context.strokeStyle = "red";
+            context.rect(entry.left, entry.top, entry.width, entry.height);
+            context.stroke();
+            if(entry.input != null)
+            {
+                entry.input.render();
+                entry.label = entry.input._value;
+            }
+        });
+    }
+    
+    function saveTemplate()
+    {
+        //this downloads the selection boxes' coordinate/label information as a JSON
+        
+        console.log("Saving...");
+        
+        pool.forEach(function (entry){
+            entry.pctLeft = entry.left / entry.canvas.width;
+            entry.pctTop = entry.top / entry.canvas.height;
+            entry.pctWidth = entry.width / entry.canvas.width;
+            entry.pctHeight = entry.height / entry.canvas.height;
+        });
+        
+        jsonString = JSON.stringify(pool);
+        
+        function download(content, fileName, contentType) {
+            var a = document.createElement("a");
+            var file = new Blob([content], {type: contentType});
+            a.href = URL.createObjectURL(file);
+            a.download = fileName;
+            a.click();
+        }
+        download(jsonString, 'templatedata.json', 'text/plain');
+    }
+    
+  </script>
+</body>
+
+</html>
