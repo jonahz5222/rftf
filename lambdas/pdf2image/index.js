@@ -1,17 +1,4 @@
 exports.handler = async (event) => {
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    return "OLD BORDER";
-    // OLD
-    
     console.log("Handler running...");
     require('child_process').execSync(
       'cp /var/task/graphicsmagick/bin/gm /tmp/.; cp /var/task/lambda-ghostscript/bin/gs /tmp/.; chmod 755 /tmp/gm; chmod 755 /tmp/gs;',//cp -r /var/task/graphicsmagick /tmp/.; cp -r /var/task/lambda-ghostscript /tmp/.; chmod -R 777 /tmp/; chmod -R 777 /tmp/graphicsmagick/bin; chmod -R 777 /tmp/lambda-ghostscript/bin;',
