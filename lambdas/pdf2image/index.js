@@ -17,7 +17,8 @@ exports.handler = async (event) => {
     //process.env['PATH'] = process.env['PATH'] + ':' + "/tmp/lambda-ghostscript/bin";
     //process.env['PATH'] = process.env['PATH'] + ':' + process.env['LAMBDA_TASK_ROOT'];
     process.env.PATH = process.env.PATH + ':/tmp/';
-    
+    process.env['MAGICK_TMPDIR'] = '/tmp/';
+    process.env['TMPDIR'] = '/tmp/';
     console.log("Task started...");
     var fs      = require('fs');
     var path    = require('path');

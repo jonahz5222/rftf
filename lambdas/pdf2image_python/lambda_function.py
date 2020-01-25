@@ -1,3 +1,4 @@
+import PIL
 from pdf2image import convert_from_path, convert_from_bytes
 from pdf2image.exceptions import (
     PDFInfoNotInstalledError,
