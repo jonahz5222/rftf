@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileFilter;
+import java.nio.charset.StandardCharsets;
 
 import org.apache.pdfbox.tools.PDFToImage;
 
@@ -23,6 +24,14 @@ import com.amazonaws.services.s3.model.ResponseHeaderOverrides;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectInputStream;
 import com.amazonaws.services.s3.model.PutObjectRequest;
+import com.amazonaws.services.s3.event.S3EventNotification;
+import com.amazonaws.services.lambda.AWSLambda;
+import com.amazonaws.services.lambda.AWSLambdaClientBuilder;
+import com.amazonaws.services.lambda.model.InvokeRequest;
+import com.amazonaws.services.lambda.model.InvokeResult;
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
+
+import org.json.JSONObject;
 /*
 import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.rendering.*;
@@ -42,12 +51,11 @@ public class PdfToImage{
     }
     */
     
-    public String myHandler(Object event, Context context) {
-        
+    public String myHandler(S3EventNotification event, Context context) {
         final AmazonS3 s3 = AmazonS3ClientBuilder.standard().withRegion(Regions.US_EAST_2).build();
-        String bucket_name = "test-pdf-data";
+        String bucket_name = event.getRecords().get(0).getS3().getBucket().getName();
         String jpg_bucket_name = "test-jpg-data";
-        String key_name = "NABForm.pdf";
+        String key_name = event.getRecords().get(0).getS3().getObject().getKey();
         try {      
             S3Object o = s3.getObject(bucket_name, key_name);
             S3ObjectInputStream s3is = o.getObjectContent();
@@ -107,6 +115,32 @@ public class PdfToImage{
             System.exit(1);
         }
         
+        /*
+        String base_name = key_name.split("\\.")[0];
+        String func_arn = "arn:aws:lambda:us-east-2:891440894509:function:parse_with_template";
+        InvokeRequest invokeRequest = new InvokeRequest()
+                .withFunctionName(func_arn)
+                .withPayload("{\"bucket\":\"" + jpg_bucket_name + "\",\"document\":\"" + base_name + "\"}");
+        InvokeResult invokeResult = null;
+
+        try {
+            AWSLambda awsLambda = AWSLambdaClientBuilder.standard()
+                    .withCredentials(DefaultAWSCredentialsProviderChain.getInstance())
+                    .withRegion(Regions.US_EAST_2).build();
+
+            invokeResult = awsLambda.invoke(invokeRequest);
+
+            String ans = new String(invokeResult.getPayload().array(), StandardCharsets.UTF_8);
+
+            //write out the return value
+            System.out.println(ans);
+
+        } catch (AmazonServiceException e) {
+            System.out.println(e);
+        }
+
+        System.out.println(invokeResult.getStatusCode());
+        */
         
         return "Complete.";
         /*LambdaLogger logger = context.getLogger();
