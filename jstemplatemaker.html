@@ -411,7 +411,7 @@
             entry.pctHeight = entry.height / entry.canvas.height;
         });
         
-        jsonString = JSON.stringify(pool);
+        jsonString = JSON.stringify(pool, null, '\t');
         
         function download(content, fileName, contentType) {
             var a = document.createElement("a");
