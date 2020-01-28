@@ -66,7 +66,7 @@ def lambda_handler(event, context):
         pass
     
     #the minimum overlap between a template box and a recognized line in order for the template to catch the line
-    overlap_threshold = 0.6
+    overlap_threshold = 0.75
     try:
         overlap_threshold = event['overlap_threshold']
     except Exception as e:
@@ -130,9 +130,6 @@ def lambda_handler(event, context):
                 if page_count in page_offsets:
                     box["pctLeft"] += page_offsets[page_count][0]
                     box["pctTop"] += page_offsets[page_count][1]
-                    box["pctWidth"] += page_offsets[page_count][0]
-                    box["pctHeight"] += page_offsets[page_count][1]
-            
                 #if template box is on the right page
                 group = defaultdict(str)
                 group['text'] = ""
@@ -141,9 +138,11 @@ def lambda_handler(event, context):
                     #Textract returns text as a LINE BlockType
                     if block['BlockType'] == "LINE":
                         geo = block['Geometry']['BoundingBox']
-                        
+                        print(block['Text'])
                         #calculate overlap. If overlap percentage is over threshold, assign text to template box
                         if get_overlap(box, geo) > overlap_threshold:
+                            print(box['label'])
+                            print(get_overlap(box, geo))
                             group['text'] += block['Text']
                             #if Textract isn't confident about OCR, label it handwriting
                             if block['Confidence'] < minimum_confidence:
