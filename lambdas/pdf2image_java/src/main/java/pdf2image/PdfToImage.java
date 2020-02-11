@@ -9,7 +9,11 @@ import java.io.IOException;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileFilter;
+import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+
 
 import org.apache.pdfbox.tools.PDFToImage;
 
@@ -41,20 +45,44 @@ import javax.imageio.*;
 */
 
 public class PdfToImage{
-    /*
-    public static void PDFtoJPG (String in, String out) throws Exception
+
+    private static String getFileChecksum(MessageDigest digest, File file) throws IOException
     {
-        PDDocument pd = PDDocument.load (new File (in));
-        PDFRenderer pr = new PDFRenderer (pd);
-        BufferedImage bi = pr.renderImageWithDPI (0, 300);
-        ImageIO.write (bi, "JPEG", new File (out)); 
+        //Get file input stream for reading the file content
+        FileInputStream fis = new FileInputStream(file);
+         
+        //Create byte array to read data in chunks
+        byte[] byteArray = new byte[1024];
+        int bytesCount = 0; 
+          
+        //Read file data and update in message digest
+        while ((bytesCount = fis.read(byteArray)) != -1) {
+            digest.update(byteArray, 0, bytesCount);
+        };
+         
+        //close the stream; We don't need it now.
+        fis.close();
+         
+        //Get the hash's bytes
+        byte[] bytes = digest.digest();
+         
+        //This bytes[] has bytes in decimal format;
+        //Convert it to hexadecimal format
+        StringBuilder sb = new StringBuilder();
+        for(int i=0; i< bytes.length ;i++)
+        {
+            sb.append(Integer.toString((bytes[i] & 0xff) + 0x100, 16).substring(1));
+        }
+         
+        //return complete hash
+       return sb.toString();
     }
-    */
+    
     
     public String myHandler(S3EventNotification event, Context context) {
         final AmazonS3 s3 = AmazonS3ClientBuilder.standard().withRegion(Regions.US_EAST_2).build();
         String bucket_name = event.getRecords().get(0).getS3().getBucket().getName();
-        String jpg_bucket_name = "test-jpg-data";
+        String jpg_bucket_name = "og-jpg-data";
         String key_name = event.getRecords().get(0).getS3().getObject().getKey();
         try {      
             S3Object o = s3.getObject(bucket_name, key_name);
@@ -99,11 +127,25 @@ public class PdfToImage{
                   }
                }; 
             // For taking both .JPG and .jpg files (useful in *nix env) 
+            MessageDigest md5Digest = null;
+            try{
+                md5Digest = MessageDigest.getInstance("MD5");
+            } catch (NoSuchAlgorithmException e)
+            {
+                System.err.println(e.getMessage());
+                System.exit(1);
+            }
             File[] fileList = dir.listFiles(fileFilter); 
             for (int i = 0; i < fileList.length; i++) {
                 if (fileList[i].isFile()) {
-                    PutObjectRequest request = new PutObjectRequest(jpg_bucket_name, fileList[i].getName(), new File("/tmp/" + fileList[i].getName()));
-                    s3.putObject(request);
+                    try{
+                        String baseName = getFileChecksum(md5Digest, fileList[i]);
+                        PutObjectRequest request = new PutObjectRequest(jpg_bucket_name, baseName + "/" + Integer.toString(i+1) + ".jpg", new File("/tmp/" + fileList[i].getName()));
+                        s3.putObject(request);
+                    } catch (IOException e) {
+                        System.err.println(e.getMessage());
+                        System.exit(1);
+                    }
                 } 
             }
             

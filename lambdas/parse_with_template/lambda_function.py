@@ -85,7 +85,6 @@ def lambda_handler(event, context):
         Prefix=document
     )
     jpg_list = [item['Key'] for item in jpg_list['Contents']]
-    print(jpg_list)
     #custom sort function that sorts by the number at the end of the filename
     def split_sort(item):
         itemname = item.split('.')[0]
@@ -123,7 +122,6 @@ def lambda_handler(event, context):
                             page_offsets[marker['pageNumber']] = [offsetX, offsetY]
                             
                 
-            print(page_offsets)
             #iterate through every box in the template file
             for box in [item for item in template if item['is_marker'] == False and item['pageNumber'] == page_count]:
                 #apply offsets gained from marker
@@ -138,11 +136,9 @@ def lambda_handler(event, context):
                     #Textract returns text as a LINE BlockType
                     if block['BlockType'] == "LINE":
                         geo = block['Geometry']['BoundingBox']
-                        print(block['Text'])
+                        
                         #calculate overlap. If overlap percentage is over threshold, assign text to template box
                         if get_overlap(box, geo) > overlap_threshold:
-                            print(box['label'])
-                            print(get_overlap(box, geo))
                             group['text'] += block['Text']
                             #if Textract isn't confident about OCR, label it handwriting
                             if block['Confidence'] < minimum_confidence:
