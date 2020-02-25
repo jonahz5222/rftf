@@ -3,57 +3,77 @@ import boto3
 import os
 from collections import defaultdict
 import pprint
-from statistics import stdev
+from statistics import stdev, mean
 
 def lambda_handler(event, context):
+    #IDENTIFY TEMPLATE
 
-    # {
-      # "Records": [
-        # {
-          # "eventVersion": "2.1",
-          # "eventSource": "aws:s3",
-          # "awsRegion": "us-east-2",
-          # "eventTime": "2019-09-03T19:37:27.192Z",
-          # "eventName": "ObjectCreated:Put",
-          # "userIdentity": {
-            # "principalId": "AWS:AIDAINPONIXQXHT3IKHL2"
-          # },
-          # "requestParameters": {
-            # "sourceIPAddress": "205.255.255.255"
-          # },
-          # "responseElements": {
-            # "x-amz-request-id": "D82B88E5F771F645",
-            # "x-amz-id-2": "vlR7PnpV2Ce81l0PRw6jlUpck7Jo5ZsQjryTjKlc5aLWGVHPZLj5NeC6qMa0emYBDXOo6QBU0Wo="
-          # },
-          # "s3": {
-            # "s3SchemaVersion": "1.0",
-            # "configurationId": "828aa6fc-f7b5-4305-8584-487c791949c1",
-            # "bucket": {
-              # "name": "lambda-artifacts-deafc19498e3f2df",
-              # "ownerIdentity": {
-                # "principalId": "A3I5XTEXAMAI3E"
-              # },
-              # "arn": "arn:aws:s3:::lambda-artifacts-deafc19498e3f2df"
+    #{
+      # 'version': '1.0',
+      # 'timestamp': '2020-02-22T01:16:34.701Z',
+      # 'requestContext': {
+        # 'requestId': 'ef75c37b-044a-441f-8b03-1d5a497dd0eb',
+        # 'functionArn': 'arn:aws:lambda:us-east-2:796077402566:function:og-pdf-to-jpg-conversion:$LATEST',
+        # 'condition': 'Success',
+        # 'approximateInvokeCount': 1
+      # },
+      # 'requestPayload': {
+        # 'Records': [
+          # {
+            # 'eventVersion': '2.1',
+            # 'eventSource': 'aws:s3',
+            # 'awsRegion': 'us-east-2',
+            # 'eventTime': '2020-02-22T01:16:14.620Z',
+            # 'eventName': 'ObjectCreated:Put',
+            # 'userIdentity': {
+              # 'principalId': 'AWS:AIDA3SWPJFHDINSURJT46'
             # },
-            # "object": {
-              # "key": "b21b84d653bb07b05b1e6b33684dc11b",
-              # "size": 1305107,
-              # "eTag": "b21b84d653bb07b05b1e6b33684dc11b",
-              # "sequencer": "0C0F6F405D6ED209E1"
+            # 'requestParameters': {
+              # 'sourceIPAddress': '128.206.251.148'
+            # },
+            # 'responseElements': {
+              # 'x-amz-request-id': '32D75585C920AC68',
+              # 'x-amz-id-2': 'zk0mltzH+LFMsLw/9iKbXrhwVZxUoS1zvczVOf8f9018METmJ36LIftkGAqO9HxO1BdxO4iQ9GV4REaiT15BT/i4QSk7BNho'
+            # },
+            # 's3': {
+              # 's3SchemaVersion': '1.0',
+              # 'configurationId': 'pdf-to-jpg-trigger',
+              # 'bucket': {
+                # 'name': 'og-document-data',
+                # 'ownerIdentity': {
+                  # 'principalId': 'A3ELL71ISRS6EL'
+                # },
+                # 'arn': 'arn:aws:s3:::og-document-data'
+              # },
+              # 'object': {
+                # 'key': 'pdf/Josh_Hawley_for_Senate_Agreement.pdf',
+                # 'size': 93263,
+                # 'eTag': '851a3270d2e885c38117ec750ef28951',
+                # 'sequencer': '005E5080DE945CDCB4'
+              # }
             # }
           # }
-        # }
-      # ]
+        # ]
+      # },
+      # 'responseContext': {
+        # 'statusCode': 200,
+        # 'executedVersion': '$LATEST'
+      # },
+      # 'responsePayload': {
+        # 'empty': False
+      # }
     # }
     
     
-    jpgbucket = event['jpg_bucket']
-    templatebucket = event['template_bucket']
-    document = event['document'] #"NABForm"
+    jpgbucket = os.environ['JPG_BUCKET']
+    jpgfolder = os.environ['JPG_FOLDER']
+    templatebucket = os.environ['TEMPLATE_BUCKET']
+    document = event['requestPayload']['Records'][0]['s3']['object']['key']
+    document = document.split(".")[0].split("/")[-1]
     #template = event['template'] #"NABtemplate_Issues_18.json"
     page = 0
     
-    match_threshold = 0.75
+    match_threshold = 0.8
 
     tmpdir = '/tmp/'
     textract = boto3.client('textract')
@@ -68,12 +88,13 @@ def lambda_handler(event, context):
     #format should be pdfname1.jpg, pdfname2.jpg, etc.
     jpg_list = s3.list_objects_v2(
         Bucket=jpgbucket,
-        Prefix=document
+        Prefix=jpgfolder + document
     )
-    jpg_list = [item['Key'] for item in jpg_list['Contents'] if item['Key'][-1] != "/"]
+    jpg_list = [item['Key'] for item in jpg_list['Contents'] if item['Key'][-4:] == ".jpg"]
+    
     #custom sort function that sorts by the number at the end of the filename
     def split_sort(item):
-        item = item.split('/')[1]
+        item = item.split('/')[-1]
         item = item.split('.')[0]
         return int(item)
     
@@ -113,12 +134,15 @@ def lambda_handler(event, context):
     )
     template_list = [item['Key'] for item in template_list['Contents'] if item['Key'][-1] != "/"]
     
-    matched_templates = []
+    matches = []
+    jpgNum = 1
     for jpg in jpg_list:
         response = textract.detect_document_text(
             Document={'S3Object': {'Bucket': jpgbucket, 'Name': jpg}})
 
         candidates = {}
+        linearOffsets = {}
+        candidate_pages = {}
         for templatename in [obj for obj in template_list if obj[-8:] == "ocr.json"]:
             
             if not os.path.isdir('/tmp/' + templatename.split('/')[0]):
@@ -133,13 +157,13 @@ def lambda_handler(event, context):
                     pageNum += 1
                     h_offsets = []
                     v_offsets = []
-                    matches = 0
+                    matched_word_count = 0
                     checked = {}
                     for line in [l for l in template["Blocks"] if l["BlockType"]=="LINE" and l["Id"] in page["Relationships"][0]["Ids"]]:
                         for child in [c for c in template["Blocks"] if c["BlockType"]=="WORD" and c["Id"] in line["Relationships"][0]["Ids"]]:
                             occurrence = next((word for word in response["Blocks"] if (word["BlockType"] == "WORD" and word["Text"] == child["Text"] and word["Id"] not in checked)), None)
                             if occurrence is not None:
-                                matches += 1
+                                matched_word_count += 1
                                 h_offsets.append(occurrence["Geometry"]["BoundingBox"]["Left"] - child["Geometry"]["BoundingBox"]["Left"])
                                 v_offsets.append(occurrence["Geometry"]["BoundingBox"]["Top"] - child["Geometry"]["BoundingBox"]["Top"])
                                 
@@ -149,25 +173,31 @@ def lambda_handler(event, context):
                                 
                     hIQR = IQR(h_offsets, len(h_offsets))
                     vIQR = IQR(v_offsets, len(v_offsets))
-                    match_pct = matches/len([x for x in template["Blocks"] if x["BlockType"] == "WORD"])
+                    match_pct = matched_word_count/len([x for x in template["Blocks"] if x["BlockType"] == "WORD"])
                     #print("Page #" + str(pageNum) + " stats:")
                     #print(hIQR)
                     #print(vIQR)
                     #print(match_pct)
                     #print("---")
-                    
                     if match_pct >= match_threshold:
-                        candidates[templatename + "_page" + str(pageNum)] = (hIQR + vIQR)/2
-        if len(candidates) == 0:
-            #print("No candidate found for JPG " + jpg)
-            matched_templates.append(None)
-        else:
+                        candidates[templatename] = (hIQR + vIQR)/2
+                        candidate_pages[templatename] = pageNum
+                        linearOffsets[templatename] = {'x':mean(h_offsets), 'y':mean(v_offsets)}
+                    
+        if len(candidates) != 0:
             #print("Best candidate for JPG " + jpg + ": " + min(candidates, key=candidates.get))
-            matched_templates.append(min(candidates, key=candidates.get))
+            best_candidate = min(candidates, key=candidates.get)
+            matches.append({'template':best_candidate[:-8] + "boxes.json", 'page':candidate_pages[best_candidate], 'offsets':linearOffsets[best_candidate]})
+        else:
+            print("No candidate found for JPG #" + str(jpgNum))
+            matches.append(None)
+            
+        jpgNum += 1
+    
     return {
         'statusCode': 200,
-        'document': document,
-        'matches': matched_templates
+        'documents': jpg_list,
+        'matches': matches
     }
     
 def get_overlap(box1, box2):

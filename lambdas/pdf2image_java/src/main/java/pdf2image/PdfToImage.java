@@ -79,13 +79,16 @@ public class PdfToImage{
     }
     
     
-    public String myHandler(S3EventNotification event, Context context) {
+    public JSONObject myHandler(S3EventNotification event, Context context) {
         final AmazonS3 s3 = AmazonS3ClientBuilder.standard().withRegion(Regions.US_EAST_2).build();
         String bucket_name = event.getRecords().get(0).getS3().getBucket().getName();
-        String jpg_bucket_name = "og-jpg-data";
-        String key_name = event.getRecords().get(0).getS3().getObject().getKey();
+        String key_name_base = event.getRecords().get(0).getS3().getObject().getKey();
+        String key_name = key_name_base.substring(4,key_name_base.length());
+        
+        JSONObject output = new JSONObject();
+        
         try {      
-            S3Object o = s3.getObject(bucket_name, key_name);
+            S3Object o = s3.getObject(bucket_name, key_name_base);
             S3ObjectInputStream s3is = o.getObjectContent();
             FileOutputStream fos = new FileOutputStream(new File("/tmp/" + key_name));
             byte[] read_buf = new byte[1024];
@@ -136,16 +139,14 @@ public class PdfToImage{
                 System.exit(1);
             }
             File[] fileList = dir.listFiles(fileFilter); 
+            String baseName = key_name.split("\\.")[0];//getFileChecksum(md5Digest, fileList[i]);
             for (int i = 0; i < fileList.length; i++) {
                 if (fileList[i].isFile()) {
-                    try{
-                        String baseName = getFileChecksum(md5Digest, fileList[i]);
-                        PutObjectRequest request = new PutObjectRequest(jpg_bucket_name, baseName + "/" + Integer.toString(i+1) + ".jpg", new File("/tmp/" + fileList[i].getName()));
-                        s3.putObject(request);
-                    } catch (IOException e) {
-                        System.err.println(e.getMessage());
-                        System.exit(1);
-                    }
+                  
+                    output.put("document",baseName);
+                    PutObjectRequest request = new PutObjectRequest(bucket_name, "jpg/" + baseName + "/" + Integer.toString(i+1) + ".jpg", new File("/tmp/" + fileList[i].getName()));
+                    s3.putObject(request);
+                    
                 } 
             }
             
@@ -183,8 +184,8 @@ public class PdfToImage{
 
         System.out.println(invokeResult.getStatusCode());
         */
-        
-        return "Complete.";
+        System.out.println(output);
+        return output;
         /*LambdaLogger logger = context.getLogger();
         logger.log("received : " + myCount);
         return String.valueOf(myCount);*/
