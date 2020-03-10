@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" 
+        content="width=device-width, 
+        initial-scale=1.0, 
+        user-scalable=no" />
+  <title>Template Maker</title>
+</head>
+
+
+<body>
+    <div id="drag-drop-area"></div>
+    <div id="content">
+        
+    </div>
+</body>
+
+<link href="https://transloadit.edgly.net/releases/uppy/v1.8.0/uppy.min.css" rel="stylesheet">
+<script src="https://transloadit.edgly.net/releases/uppy/v1.8.0/uppy.min.js"></script>
+<script>
+    var filename = "";
+    var uppy = Uppy.Core()
+        .use(Uppy.Dashboard, {
+            inline: true,   
+        target: '#drag-drop-area',
+        width:400,
+        height:200
+        })
+        .use(Uppy.Tus, {endpoint: 'https://master.tus.io/files/'})
+
+    uppy.on('complete', (result) => {
+        console.log('Upload complete! We’ve uploaded these files:', result.successful)
+        filename = result.successful[0].tus.uploadUrl;
+        loadSourcePDF(filename);
+    })
+</script>
+    
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.2.228/build/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/3.6.2/fabric.min.js"></script>
+<script>
+    var originalLog = console.log;
+    console.log = function(obj) {
+        originalLog(JSON.parse(JSON.stringify(obj)));
+    };
+
+    var pdfjsLib = window['pdfjs-dist/build/pdf'];
+    // create a wrapper around native canvas element (with id="c")
+    
+    var activeCanvas = null;
+    
+    
+    
+    function loadSourcePDF(url)
+    {
+        var loadingTask = pdfjsLib.getDocument(url);
+        loadingTask.promise.then(function(pdf) {
+            for(let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++)
+            {
+                pdf.getPage(pageNumber).then(function(page) {
+                                        
+                    var scale = 1;
+                    var viewport = page.getViewport({scale: scale});
+
+                    // Prepare canvas using PDF page dimensions
+                    let canvas = prepareCanvas(pageNumber);
+                    //canvases.push(canvas);
+                    
+                    canvas.setHeight(viewport.height);
+                    canvas.setWidth(viewport.width);
+                    
+                    let context = canvas.getContext('2d');
+                    // Render PDF page into canvas context
+                    var renderContext = {
+                      canvasContext: context,
+                      viewport: viewport
+                    };
+                    
+                    var renderTask = page.render(renderContext);
+                    
+                    renderTask.promise.then(function () {
+                        fabric.Image.fromURL(canvas.getElement().toDataURL('image/jpg'),function(img){
+                            img.scaleToWidth(canvas.getWidth());
+                            canvas.setBackgroundImage(img,function()
+                                {
+                                    canvas.renderAll();
+                                    
+                                    if(canvas.pageNum == pdf.numPages)
+                                    {
+                                        var collection = document.getElementsByClassName('upper-canvas ');
+                                        for (entry of collection){
+                                            entry.tabIndex = 1000;
+                                            entry.addEventListener("keydown", keyevents);
+                                        };
+                                    }
+                                });
+                            
+                        });
+                        
+         
+
+                        page.cleanup();
+                    });
+                   
+                },
+                function(error)
+                {
+                    console.log(error);
+                });
+            }
+            
+        },null);
+        
+    }
+    function prepareCanvas(x)
+    {
+        const canvas = document.createElement('canvas');
+        canvas.setAttribute("id", "canvas-" + x.toString());
+        canvas.setAttribute("crossorigin", "");
+        //canvas.setAttribute("display", "block");
+        
+        document.getElementById('content').appendChild(canvas);
+         
+        
+        var f_canvas = new fabric.Canvas(canvas.getAttribute("id"),{uniScaleTransform:true});
+        
+        f_canvas._collectObjects = (function() {
+            var cached_function = f_canvas._collectObjects;
+
+            return function() {
+                
+                //var result = cached_function.apply(this, arguments); // use .apply() to call it
+                var selection_rect = new fabric.Rect({
+                    left: this._groupSelector.ex,
+                    top: this._groupSelector.ey,
+                    width: this._groupSelector.left,
+                    height: this._groupSelector.top,
+                    stroke: "red",
+                    strokeWidth: 2,
+                    fill: 'rgba(0,0,0,0)',
+                    strokeUniform: true,
+                    noScaleCache: false,
+                    hasRotatingPoint: false,
+                    cornerSize: 8,
+                    transparentCorners: false
+                });
+                this.add(selection_rect);
+                this.setActiveObject(selection_rect);
+                this.renderAll();
+                return [];
+            };
+        })();
+        
+        f_canvas.pageNum = x;
+        f_canvas.localX = 0;
+        f_canvas.localY = 0;
+        
+        f_canvas.renderOnAddRemove = false;
+       
+        f_canvas.on('mouse:over', function(options){
+            activeCanvas = f_canvas;
+        });
+        /*
+        f_canvas.on('mouse:down', function(options){
+            f_canvas.started = true;
+            x = options.e.offsetX;
+            y = options.e.offsetY;
+            f_canvas.currX = x;
+            f_canvas.currY = y;
+            var selection_rect = new fabric.Rect({
+              left: x,
+              top: y,
+              width: 0,
+              height: 0,
+              stroke: "red",
+              strokeWidth: 2,
+              fill: 'rgba(0,0,0,0)',
+              strokeUniform: true,
+              noScaleCache: false
+            });
+            f_canvas.add(selection_rect); 
+            //f_canvas.renderAll();
+            f_canvas.setActiveObject(selection_rect); 
+            
+        });*/
+        f_canvas.on('mouse:move', function(options){
+            f_canvas.localX = options.e.offsetX;
+            f_canvas.localY = options.e.offsetY;
+        });
+        /*
+        f_canvas.on('mouse:up', function(options){
+            if(f_canvas.started == null || f_canvas.started == false) {return;}
+            
+            f_canvas.started = false;
+        });
+        */
+        
+        
+        return f_canvas;
+    }    
+    
+    
+    function keyevents(e)
+    {
+        if(activeCanvas == null){return;}
+        if(e.keyCode == 65)
+        {
+            var selection_rect = new fabric.Rect({
+              left: activeCanvas.localX,
+              top: activeCanvas.localY,
+              width: 50,
+              height: 50,
+              stroke: "red",
+              strokeWidth: 2,
+              fill: 'rgba(0,0,0,0)',
+              strokeUniform: true,
+              noScaleCache: false,
+              hasRotatingPoint: false,
+              cornerSize: 8,
+              transparentCorners: false
+            });
+            activeCanvas.add(selection_rect); 
+            activeCanvas.setActiveObject(selection_rect); 
+            activeCanvas.renderAll();
+        }
+        if(e.keyCode == 68)
+        {
+            if(activeCanvas.getActiveObject() == null){return;}
+            activeCanvas.remove(activeCanvas.getActiveObject());
+            activeCanvas.renderAll();
+        }
+    }
+    
+    /*
+    f_canvas = prepareCanvas(1);
+    
+    
+    fabric.Image.fromURL("https://ndcys.com/wp-content/uploads/2018/04/TEST.jpg",function(img)
+    {
+        console.log("img loaded");
+        img.scaleToWidth(f_canvas.getWidth());
+       // img.height = f_canvas.getHeight();
+        f_canvas.setBackgroundImage(img);
+        f_canvas.renderAll();
+        //canvas.requestRenderAll.bind(canvas);
+    });
+    
+    
+    f_canvas.add(
+            new fabric.Rect({
+              left: 0,
+              top: 0,
+              width: 100,
+              height: 100,
+              stroke: "red",
+              strokeWidth: 2,
+              fill: 'rgba(0,0,0,0)',
+              strokeUniform: true,
+              noScaleCache: false
+            })
+        );
+    f_canvas.renderAll();*/
+    
+    //canvas.add(rect);
+</script>
+</html>
