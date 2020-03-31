@@ -1,19 +1,20 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" 
+    <meta name="viewport" 
         content="width=device-width, 
         initial-scale=1.0, 
         user-scalable=no" />
-  <title>Template Maker</title>
+    <title>Template Maker</title>
 </head>
 
 
 <body>
     <div id="drag-drop-area"></div>
-    <div id="content">
-        
-    </div>
+    <p>Click and drag to create template boxes. Press 'D' to delete selected box.</p>
+    <button onclick="saveTemplate()">Save Template</button>
+    <button onclick="clearTemplate()">Clear Template</button><br>
+    <div id="content"></div>
 </body>
 
 <link href="https://transloadit.edgly.net/releases/uppy/v1.8.0/uppy.min.css" rel="stylesheet">
@@ -38,19 +39,32 @@
     
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.2.228/build/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/3.6.2/fabric.min.js"></script>
-<script>
-    var originalLog = console.log;
-    console.log = function(obj) {
-        originalLog(JSON.parse(JSON.stringify(obj)));
-    };
+<script src="download.js"></script>
 
+
+<script>
+    /*
+        Canvas          the native DOM Canvas element that Javascript uses
+        fabric.Canvas   the object that Fabric.js wraps around native
+                        canvases to provide extra functionality
+        Template        the combination of all the fabric.Canvases that show 
+                        all the pages of the PDF
+    */
+
+    /* This program works by taking a PDF, rendering it pages onto native HTML5 
+       canvases using PDF.js, converting the canvases to jpegs(base64 data URLs), and then 
+       setting those jpegs as the background images of a collection of fabric.Canvases
+       that can be drawn on.
+    */
+
+    //import the PDF.js library
     var pdfjsLib = window['pdfjs-dist/build/pdf'];
-    // create a wrapper around native canvas element (with id="c")
     
+    //activeCanvas stores a reference to the fabric.Canvas that has the focus
     var activeCanvas = null;
-    
-    
-    
+    var canvases = [];
+        
+    //loadSourcePDF takes the URL of a PDF file and creates fabric.Canvas objects to display each page of the PDF
     function loadSourcePDF(url)
     {
         var loadingTask = pdfjsLib.getDocument(url);
@@ -62,9 +76,9 @@
                     var scale = 1;
                     var viewport = page.getViewport({scale: scale});
 
-                    // Prepare canvas using PDF page dimensions
+                    // Prepare fabric.Canvas using PDF page dimensions
                     let canvas = prepareCanvas(pageNumber);
-                    //canvases.push(canvas);
+                    canvases.push(canvas);
                     
                     canvas.setHeight(viewport.height);
                     canvas.setWidth(viewport.width);
@@ -79,12 +93,15 @@
                     var renderTask = page.render(renderContext);
                     
                     renderTask.promise.then(function () {
+                        
+                        //assigns the rendered PDF to the fabric.Canvas background
                         fabric.Image.fromURL(canvas.getElement().toDataURL('image/jpg'),function(img){
                             img.scaleToWidth(canvas.getWidth());
                             canvas.setBackgroundImage(img,function()
                                 {
                                     canvas.renderAll();
                                     
+                                    //if this is the final page to be created, add key event listeners to all canvases
                                     if(canvas.pageNum == pdf.numPages)
                                     {
                                         var collection = document.getElementsByClassName('upper-canvas ');
@@ -94,117 +111,175 @@
                                         };
                                     }
                                 });
-                            
                         });
-                        
-         
-
                         page.cleanup();
                     });
-                   
                 },
                 function(error)
                 {
                     console.log(error);
                 });
             }
-            
         },null);
-        
     }
+    
+    //prepareCanvas creates and configures the fabric.Canvas object
     function prepareCanvas(x)
     {
+    
+        //create Canvas DOM element
         const canvas = document.createElement('canvas');
         canvas.setAttribute("id", "canvas-" + x.toString());
-        canvas.setAttribute("crossorigin", "");
-        //canvas.setAttribute("display", "block");
-        
+        canvas.setAttribute("crossorigin", "");        
         document.getElementById('content').appendChild(canvas);
          
-        
+        //create fabric.Canvas object around DOM canvas
         var f_canvas = new fabric.Canvas(canvas.getAttribute("id"),{uniScaleTransform:true});
         
-        f_canvas._collectObjects = (function() {
-            var cached_function = f_canvas._collectObjects;
-
-            return function() {
-                
-                //var result = cached_function.apply(this, arguments); // use .apply() to call it
-                var selection_rect = new fabric.Rect({
-                    left: this._groupSelector.ex,
-                    top: this._groupSelector.ey,
-                    width: this._groupSelector.left,
-                    height: this._groupSelector.top,
-                    stroke: "red",
-                    strokeWidth: 2,
-                    fill: 'rgba(0,0,0,0)',
-                    strokeUniform: true,
-                    noScaleCache: false,
-                    hasRotatingPoint: false,
-                    cornerSize: 8,
-                    transparentCorners: false
-                });
-                this.add(selection_rect);
-                this.setActiveObject(selection_rect);
-                this.renderAll();
-                return [];
-            };
-        })();
+        //overwrite fabric.Canvas._collectObjects() to add drag-to-create selection behavior
+        f_canvas._collectObjects = function(){
+            
+            var left, top, width, height;
+            if(f_canvas._groupSelector.left >= 0)
+            {
+                left = f_canvas._groupSelector.ex;
+                width = f_canvas._groupSelector.left;
+            }
+            else
+            {
+                left = f_canvas._groupSelector.ex  + f_canvas._groupSelector.left;
+                width = Math.abs(f_canvas._groupSelector.left);
+            }
+            if(f_canvas._groupSelector.top >= 0)
+            {
+                top = f_canvas._groupSelector.ey;
+                height = f_canvas._groupSelector.top;
+            }
+            else
+            {
+                top = f_canvas._groupSelector.ey  + f_canvas._groupSelector.top;
+                height = Math.abs(f_canvas._groupSelector.top);
+            }
+            
+            
+            var selection_rect = new fabric.Rect({
+                left: left,
+                top: top,
+                width: width,
+                height: height,
+                stroke: "red",
+                strokeWidth: 2,
+                fill: 'rgba(0,0,0,0)',
+                strokeUniform: true,
+                noScaleCache: false,
+                hasRotatingPoint: false,
+                cornerSize: 8,
+                transparentCorners: false,
+                backgroundColor:'rgba(200,200,200,0.8)'
+            });
+            
+            selection_rect.input_offset = -27;
+            
+            var selection_text = new fabric.Textbox("Label",{
+                left: left,
+                top: top+selection_rect.input_offset,
+                width: width,
+                fill:'red',
+                fontSize:25,
+                fontWeight:'bold',
+                fontFamily:'Calibri',
+                borderColor:'rgb(0,0,0)',
+                backgroundColor:'rgba(200,200,200,0.8)',
+                lockMovementX:true,
+                lockMovementY:true,
+                hasControls:false
+            });
+            
+            var originalRender = fabric.Textbox.prototype._render;
+            selection_text._render = function(ctx) {
+                originalRender.call(selection_text, ctx);
+                //Don't draw border if it is active(selected/ editing mode)
+             
+                var w = selection_text.width,
+                  h = selection_text.height,
+                  x = -selection_text.width / 2,
+                  y = -selection_text.height / 2;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x + w, y);
+                ctx.lineTo(x + w, y + h);
+                ctx.lineTo(x, y + h);
+                ctx.lineTo(x, y);
+                ctx.closePath();
+                var stroke = ctx.strokeStyle;
+                ctx.strokeStyle = 'red';
+                ctx.stroke();
+                //ctx.strokeStyle = stroke;
+              
+            }
+            
+            
+            selection_rect.inputbox = selection_text;
+            selection_text.selector = selection_rect;
+                        
+            f_canvas.add(selection_rect);
+            f_canvas.add(selection_text);
+            
+            f_canvas.sendBackwards(selection_text);
+            f_canvas.setActiveObject(selection_rect);
+            f_canvas.renderAll();
+            return [];
+        };
         
         f_canvas.pageNum = x;
         f_canvas.localX = 0;
         f_canvas.localY = 0;
         
         f_canvas.renderOnAddRemove = false;
-       
+        
+        f_canvas.on('object:moving', function(options){
+            var target = options.target;
+            target.inputbox.setOptions({
+                left: target.left,
+                top: target.top+target.input_offset
+            });
+            target.inputbox.setCoords();
+        });
+        f_canvas.on('object:scaling', function(options){
+            var target = options.target;
+            target.inputbox.setOptions({
+                left: target.left,
+                top: target.top+target.input_offset
+            });
+            console.log(target.inputbox.left);
+            console.log(target.inputbox.width);
+            target.setCoords();
+            target.inputbox.setCoords();
+            f_canvas.renderAll();
+        });
+        f_canvas.on('selection:created', function(){});
         f_canvas.on('mouse:over', function(options){
             activeCanvas = f_canvas;
         });
-        /*
-        f_canvas.on('mouse:down', function(options){
-            f_canvas.started = true;
-            x = options.e.offsetX;
-            y = options.e.offsetY;
-            f_canvas.currX = x;
-            f_canvas.currY = y;
-            var selection_rect = new fabric.Rect({
-              left: x,
-              top: y,
-              width: 0,
-              height: 0,
-              stroke: "red",
-              strokeWidth: 2,
-              fill: 'rgba(0,0,0,0)',
-              strokeUniform: true,
-              noScaleCache: false
-            });
-            f_canvas.add(selection_rect); 
-            //f_canvas.renderAll();
-            f_canvas.setActiveObject(selection_rect); 
-            
-        });*/
+
         f_canvas.on('mouse:move', function(options){
             f_canvas.localX = options.e.offsetX;
             f_canvas.localY = options.e.offsetY;
         });
-        /*
-        f_canvas.on('mouse:up', function(options){
-            if(f_canvas.started == null || f_canvas.started == false) {return;}
-            
-            f_canvas.started = false;
-        });
-        */
-        
         
         return f_canvas;
     }    
     
-    
+    //handles keypresses for the current active canvas
     function keyevents(e)
     {
         if(activeCanvas == null){return;}
+        
+        //'A' pressed, add a template box at cursor. DISABLED
         if(e.keyCode == 65)
         {
+            return;
+        
             var selection_rect = new fabric.Rect({
               left: activeCanvas.localX,
               top: activeCanvas.localY,
@@ -217,50 +292,57 @@
               noScaleCache: false,
               hasRotatingPoint: false,
               cornerSize: 8,
-              transparentCorners: false
+              transparentCorners: false,
+              backgroundColor:'rgba(255,255,255,0.8)'
             });
             activeCanvas.add(selection_rect); 
             activeCanvas.setActiveObject(selection_rect); 
             activeCanvas.renderAll();
         }
+        
+        //'D' pressed, delete active box
         if(e.keyCode == 68)
         {
             if(activeCanvas.getActiveObject() == null){return;}
-            activeCanvas.remove(activeCanvas.getActiveObject());
+            if(activeCanvas.getActiveObject().inputbox != null){
+                activeCanvas.remove(activeCanvas.getActiveObject().inputbox);
+                activeCanvas.remove(activeCanvas.getActiveObject());
+            }else{
+                activeCanvas.remove(activeCanvas.getActiveObject().selector);
+                activeCanvas.remove(activeCanvas.getActiveObject());
+            }
             activeCanvas.renderAll();
         }
     }
     
-    /*
-    f_canvas = prepareCanvas(1);
-    
-    
-    fabric.Image.fromURL("https://ndcys.com/wp-content/uploads/2018/04/TEST.jpg",function(img)
+    //saveTemplate saves the JSON representation of the fabric.Canvases
+    //this JSON can be used to reload the entire fabric.Canvas setup in the future
+    function saveTemplate()
     {
-        console.log("img loaded");
-        img.scaleToWidth(f_canvas.getWidth());
-       // img.height = f_canvas.getHeight();
-        f_canvas.setBackgroundImage(img);
-        f_canvas.renderAll();
-        //canvas.requestRenderAll.bind(canvas);
-    });
+        var template = new Object;
+        template.pages = []
+        canvases.forEach(function(entry){
+            entry.getObjects().forEach(function(obj){
+                if(obj.type == 'rect')
+                {
+                    obj.label = obj.inputbox.text;
+                }
+            });
+            template.pages.push(entry.toJSON(['label']));
+        });
+
+        download(JSON.stringify(template,null,2), "template.json", "text/plain");
+    }
     
-    
-    f_canvas.add(
-            new fabric.Rect({
-              left: 0,
-              top: 0,
-              width: 100,
-              height: 100,
-              stroke: "red",
-              strokeWidth: 2,
-              fill: 'rgba(0,0,0,0)',
-              strokeUniform: true,
-              noScaleCache: false
-            })
-        );
-    f_canvas.renderAll();*/
-    
-    //canvas.add(rect);
+    //clearTemplate wipes all selection boxes from all the fabric.Canvases
+    function clearTemplate()
+    {
+        canvases.forEach(function(entry){
+            entry.getObjects().forEach(function(item){
+                entry.remove(item);
+            });
+            entry.renderAll();
+        });
+    }
 </script>
 </html>
