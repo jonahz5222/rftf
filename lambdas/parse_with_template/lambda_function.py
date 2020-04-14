@@ -84,7 +84,7 @@ def lambda_handler(event, context):
         template_name = matches[page_count-1]['template']
         
         offsets = matches[page_count-1]['offsets']
-        template_page = matches[page_count]['page']
+        template_page = matches[page_count-1]['page']
         
         s3.download_file(templatebucket, template_name, tmpdir + template_name.split('/')[-1])
         with open(tmpdir + template_name.split('/')[-1], "r") as templatefile:
@@ -95,26 +95,34 @@ def lambda_handler(event, context):
             response = textract.detect_document_text(
                 Document={'S3Object': {'Bucket': jpgbucket, 'Name': jpg}})
             #iterate through every box in the template file
-            for box in [item for item in template if item['pageNumber'] == template_page]:
-                #apply offsets gained from marker
-                box["pctLeft"] += offsets['x']
-                box["pctTop"] += offsets['y']
-                #if template box is on the right page
-                group = defaultdict(str)
-                group['text'] = ""
-                group['handwritten'] = False
-                for block in response['Blocks']:
-                    #Textract returns text as a LINE BlockType
-                    if block['BlockType'] == "LINE":
-                        geo = block['Geometry']['BoundingBox']
-                        
-                        #calculate overlap. If overlap percentage is over threshold, assign text to template box
-                        if get_overlap(box, geo) > overlap_threshold:
-                            group['text'] += block['Text']
-                            #if Textract isn't confident about OCR, label it handwriting
-                            if block['Confidence'] < minimum_confidence:
-                                group['handwritten'] = True
-                parsedResults[box['label']] = group
+            
+            ######
+            template_page_count = 1
+            for page in template["pages"]:
+                if template_page_count == page_count:
+                    boxes = [x for x in page["objects"] if x["type"] == "rect"]
+                    for box in boxes:
+                        box["pctLeft"] += offsets['x']
+                        box["pctTop"] += offsets['y']
+                        #if template box is on the right page
+                        group = defaultdict(str)
+                        group['text'] = ""
+                        group['handwritten'] = False
+                        for block in response['Blocks']:
+                            #Textract returns text as a LINE BlockType
+                            if block['BlockType'] == "LINE":
+                                geo = block['Geometry']['BoundingBox']
+                                
+                                #calculate overlap. If overlap percentage is over threshold, assign text to template box
+                                if get_overlap(box, geo) > overlap_threshold:
+                                    group['text'] += block['Text']
+                                    #if Textract isn't confident about OCR, label it handwriting
+                                    if block['Confidence'] < minimum_confidence:
+                                        group['handwritten'] = True
+                        parsedResults[box['label']] = group
+                template_page_count += 1
+                
+            ######             
             page_count += 1
             
     #return parsed results

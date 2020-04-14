@@ -193,12 +193,13 @@ def lambda_handler(event, context):
             matches.append(None)
             
         jpgNum += 1
-    
-    return {
+    result = {
         'statusCode': 200,
         'documents': jpg_list,
         'matches': matches
     }
+    print(result)
+    return result
     
 def get_overlap(box1, box2):
     """
