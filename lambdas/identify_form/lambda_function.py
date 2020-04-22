@@ -68,8 +68,28 @@ def lambda_handler(event, context):
     jpgbucket = os.environ['JPG_BUCKET']
     jpgfolder = os.environ['JPG_FOLDER']
     templatebucket = os.environ['TEMPLATE_BUCKET']
-    document = event['requestPayload']['Records'][0]['s3']['object']['key']
-    document = document.split(".")[0].split("/")[-1]
+    document = None
+    jpg_list = None
+    template_list = None
+    
+    s3 = boto3.client('s3')
+    
+    if "retry" in event:
+        jpg_list = event['jpgs']
+        template_list = event['templates']
+    else:
+        document = event['requestPayload']['Records'][0]['s3']['object']['key']
+        document = document.split(".")[0].split("/")[-1]
+        jpg_list = s3.list_objects_v2(
+            Bucket=jpgbucket,
+            Prefix=jpgfolder + document
+        )
+        jpg_list = [item['Key'] for item in jpg_list['Contents'] if item['Key'][-4:] == ".jpg"]
+        
+        template_list = s3.list_objects_v2(
+            Bucket=templatebucket
+        )
+        template_list = [item['Key'] for item in template_list['Contents'] if item['Key'][-1] != "/"]
     #template = event['template'] #"NABtemplate_Issues_18.json"
     page = 0
     
@@ -79,18 +99,14 @@ def lambda_handler(event, context):
     textract = boto3.client('textract')
     
     #establish S3 connection
-    s3 = boto3.client('s3')
+    
   
     #retrieve template JSON from S3 bucket
     #s3.download_file(templatebucket, template, tmpdir + template)
     
     #retrieve list of JPGs that correspond to the pages of the PDF
     #format should be pdfname1.jpg, pdfname2.jpg, etc.
-    jpg_list = s3.list_objects_v2(
-        Bucket=jpgbucket,
-        Prefix=jpgfolder + document
-    )
-    jpg_list = [item['Key'] for item in jpg_list['Contents'] if item['Key'][-4:] == ".jpg"]
+    
     
     #custom sort function that sorts by the number at the end of the filename
     def split_sort(item):
@@ -112,7 +128,7 @@ def lambda_handler(event, context):
         n = (n + 1) // 2 - 1
         return n + l 
   
-    # Function to calculate IQR 
+    # Function to calculate interquartile range
     def IQR(a, n): 
       
         a.sort() 
@@ -129,10 +145,7 @@ def lambda_handler(event, context):
         # IQR calculation 
         return (Q3 - Q1)
     
-    template_list = s3.list_objects_v2(
-        Bucket=templatebucket
-    )
-    template_list = [item['Key'] for item in template_list['Contents'] if item['Key'][-1] != "/"]
+    
     
     matches = []
     jpgNum = 1

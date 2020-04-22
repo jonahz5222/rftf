@@ -5,7 +5,6 @@ from collections import defaultdict
 import pprint
 
 def lambda_handler(event, context):
-    #PARSE TEMPLATE
 
     # {
       # "Records": [
@@ -47,103 +46,109 @@ def lambda_handler(event, context):
     # }
     
     
-    jpgbucket = os.environ['JPG_BUCKET']
-    templatebucket = os.environ['TEMPLATE_BUCKET']
-    documents = None
-    matches = None
-    if "retry" in event:
-        documents = event['jpgs']
-        matches
-    else:
-        documents = event['responsePayload']['documents']
-        matches = event['responsePayload']['matches']
-    
-        if None in matches:
-            return {
-                'statusCode': 200,
-                'returnStatus': 'incomplete',
-                'body': {'matches' : len(matches) - matches.count(None), 'total' : len(documents)}
-            }
-
+    jpgbucket = event['document_bucket']
+    templatebucket = event['templates_bucket']
+    document = event['document'] #"NABForm"
+    template = event['template'] #"NABtemplate_Issues_18.json"
+    page = 0
+    try:
+        page = event['page']
+    except Exception as e:
+        pass
     tmpdir = '/tmp/'
     textract = boto3.client('textract')
-
+    
     #minimum confidence percentage to be labelled as machine text instead of handwriting
     minimum_confidence = 95
+    try:
+        minimum_confidence = event['minimum_confidence']
+    except Exception as e:
+        pass
     
     #the minimum overlap between a template box and a recognized line in order for the template to catch the line
     overlap_threshold = 0.75
+    try:
+        overlap_threshold = event['overlap_threshold']
+    except Exception as e:
+        pass
     
     #establish S3 connection
     s3 = boto3.client('s3')
   
-
+    #retrieve template JSON from S3 bucket
+    s3.download_file(templatebucket, template, tmpdir + template)
+    
     #retrieve list of JPGs that correspond to the pages of the PDF
     #format should be pdfname1.jpg, pdfname2.jpg, etc.
-    jpg_list = documents   
+    jpg_list = s3.list_objects_v2(
+        Bucket=jpgbucket,
+        Prefix=document
+    )
+    jpg_list = [item['Key'] for item in jpg_list['Contents']]
+    #custom sort function that sorts by the number at the end of the filename
+    def split_sort(item):
+        itemname = item.split('.')[0]
+        num = itemname[len(document):]
+        return int(num)
+    
+    #sort using above function
+    jpg_list.sort(key=split_sort)
+    
     
     #parse each JPG using template JSON
     page_count = 1
     parsedResults = defaultdict(str)
-    
-    for jpg in jpg_list:
-        template_name = matches[page_count-1]['template']
+    with open(tmpdir + template, "r") as templatefile:
+        template = templatefile.read()
+        template = json.loads(template)
+        for jpg in jpg_list:
+            #if page is a valid page number, only process that page. Saves me some billed processing time lol
+            if(page > 0 and page <= page_count):
+                if page_count != page:
+                    continue
         
-        offsets = matches[page_count-1]['offsets']
-        template_page = matches[page_count-1]['page']
-        
-        s3.download_file(templatebucket, template_name, tmpdir + template_name.split('/')[-1])
-        with open(tmpdir + template_name.split('/')[-1], "r") as templatefile:
-            template = templatefile.read()
-            template = json.loads(template)
-    
-            response = None
-            try:
-                response = textract.detect_document_text(
-                    Document={'S3Object': {'Bucket': jpgbucket, 'Name': jpg}})
-                #iterate through every box in the template file
-            except Exception as e:
-                print(e)
-                return {
-                    'statusCode': 200,
-                    'returnStatus': 'nojpg'
-                }
-            
-            ######
-            template_page_count = 1
-            for page in template["pages"]:
-                if template_page_count == page_count:
-                    boxes = [x for x in page["objects"] if x["type"] == "rect"]
-                    for box in boxes:
-                        box["pctLeft"] += offsets['x']
-                        box["pctTop"] += offsets['y']
-                        #if template box is on the right page
-                        group = defaultdict(str)
-                        group['text'] = ""
-                        group['handwritten'] = False
-                        for block in response['Blocks']:
-                            #Textract returns text as a LINE BlockType
-                            if block['BlockType'] == "LINE":
-                                geo = block['Geometry']['BoundingBox']
-                                
-                                #calculate overlap. If overlap percentage is over threshold, assign text to template box
-                                if get_overlap(box, geo) > overlap_threshold:
-                                    group['text'] += block['Text']
-                                    #if Textract isn't confident about OCR, label it handwriting
-                                    if block['Confidence'] < minimum_confidence:
-                                        group['handwritten'] = True
-                        parsedResults[box['label']] = group
-                template_page_count += 1
+            response = textract.detect_document_text(
+                Document={'S3Object': {'Bucket': jpgbucket, 'Name': jpg}})
+
+            #identify marker and figure offset
+            page_offsets = {}
+            for marker in [item for item in template if item['is_marker'] == True and item['pageNumber'] == page_count]:
+                for block in response['Blocks']:
+                    if block['BlockType'] == "LINE":
+                        if block['Text'] in marker['label']:
+                            geo = block['Geometry']['BoundingBox']
+                            offsetX = geo['Left'] - marker['pctLeft']
+                            offsetY = geo['Top'] - marker['pctTop']
+                            page_offsets[marker['pageNumber']] = [offsetX, offsetY]
+                            
                 
-            ######             
+            #iterate through every box in the template file
+            for box in [item for item in template if item['is_marker'] == False and item['pageNumber'] == page_count]:
+                #apply offsets gained from marker
+                if page_count in page_offsets:
+                    box["pctLeft"] += page_offsets[page_count][0]
+                    box["pctTop"] += page_offsets[page_count][1]
+                #if template box is on the right page
+                group = defaultdict(str)
+                group['text'] = ""
+                group['handwritten'] = False
+                for block in response['Blocks']:
+                    #Textract returns text as a LINE BlockType
+                    if block['BlockType'] == "LINE":
+                        geo = block['Geometry']['BoundingBox']
+                        
+                        #calculate overlap. If overlap percentage is over threshold, assign text to template box
+                        if get_overlap(box, geo) > overlap_threshold:
+                            group['text'] += block['Text']
+                            #if Textract isn't confident about OCR, label it handwriting
+                            if block['Confidence'] < minimum_confidence:
+                                group['handwritten'] = True
+                parsedResults[box['label']] = group
             page_count += 1
             
     #return parsed results
-    print("Result:")
-    print(parsedResults)
     return {
         'statusCode': 200,
-        'returnStatus': 'complete',
         'body': parsedResults
     }
     
