@@ -55,15 +55,18 @@ def lambda_handler(event, context):
         documents = event['jpgs']
         matches
     else:
-        documents = event['responsePayload']['documents']
-        matches = event['responsePayload']['matches']
+        documents = event['documents']
+        matches = event['matches']
     
         if None in matches:
-            return {
+            payload = {
                 'statusCode': 200,
                 'returnStatus': 'incomplete',
                 'body': {'matches' : len(matches) - matches.count(None), 'total' : len(documents)}
             }
+            pylambda = boto3.client('lambda')
+            pylambda.invoke(FunctionName="og-handle-results",InvocationType="Event",Payload=json.dumps(payload))
+            return {}
 
     tmpdir = '/tmp/'
     textract = boto3.client('textract')
@@ -81,7 +84,7 @@ def lambda_handler(event, context):
     #retrieve list of JPGs that correspond to the pages of the PDF
     #format should be pdfname1.jpg, pdfname2.jpg, etc.
     jpg_list = documents   
-    
+    print(jpg_list)
     #parse each JPG using template JSON
     page_count = 1
     parsedResults = defaultdict(str)
@@ -110,30 +113,26 @@ def lambda_handler(event, context):
                 }
             
             ######
-            template_page_count = 1
-            for page in template["pages"]:
-                if template_page_count == page_count:
-                    boxes = [x for x in page["objects"] if x["type"] == "rect"]
-                    for box in boxes:
-                        box["pctLeft"] += offsets['x']
-                        box["pctTop"] += offsets['y']
-                        #if template box is on the right page
-                        group = defaultdict(str)
-                        group['text'] = ""
-                        group['handwritten'] = False
-                        for block in response['Blocks']:
-                            #Textract returns text as a LINE BlockType
-                            if block['BlockType'] == "LINE":
-                                geo = block['Geometry']['BoundingBox']
-                                
-                                #calculate overlap. If overlap percentage is over threshold, assign text to template box
-                                if get_overlap(box, geo) > overlap_threshold:
-                                    group['text'] += block['Text']
-                                    #if Textract isn't confident about OCR, label it handwriting
-                                    if block['Confidence'] < minimum_confidence:
-                                        group['handwritten'] = True
-                        parsedResults[box['label']] = group
-                template_page_count += 1
+            page = template["pages"][template_page-1]
+            boxes = [x for x in page["objects"] if x["type"] == "rect"]
+            for box in boxes:
+                box["pctLeft"] += offsets['x']
+                box["pctTop"] += offsets['y']
+                group = defaultdict(str)
+                group['text'] = ""
+                group['handwritten'] = False
+                for block in response['Blocks']:
+                    #Textract returns text as a LINE BlockType
+                    if block['BlockType'] == "LINE":
+                        geo = block['Geometry']['BoundingBox']
+                        
+                        #calculate overlap. If overlap percentage is over threshold, assign text to template box
+                        if get_overlap(box, geo) > overlap_threshold:
+                            group['text'] += block['Text']
+                            #if Textract isn't confident about OCR, label it handwriting
+                            if block['Confidence'] < minimum_confidence:
+                                group['handwritten'] = True
+                parsedResults[box['label']] = group
                 
             ######             
             page_count += 1
@@ -141,11 +140,17 @@ def lambda_handler(event, context):
     #return parsed results
     print("Result:")
     print(parsedResults)
-    return {
+    result =  {
         'statusCode': 200,
         'returnStatus': 'complete',
-        'body': parsedResults
+        'body': parsedResults,
+        'jpgbucket': jpgbucket,
+        'document': documents[0]
     }
+    
+    pylambda = boto3.client('lambda')
+    pylambda.invoke(FunctionName="og-handle-results",InvocationType="Event",Payload=json.dumps(result))
+    return {}
     
 def get_overlap(box1, box2):
     """
